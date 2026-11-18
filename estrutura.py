@@ -47,3 +47,15 @@ class Estrutura:
     def componentes(self, pai):
         """Devolve o dicionário {filho: quantidade} do pai (vazio se não tiver)."""
         return self.bom.get(pai, {})
+
+    def imprimir_arvore(self, codigo, nivel=0, quantidade=None):
+        """Imprime a BOM indentada, de forma recursiva, indicando o nível."""
+        item = self.cadastro.buscar(codigo)
+        recuo = "    " * nivel
+        if nivel == 0:
+            print(f"{codigo} {item.descricao}  [nível 0]")
+        else:
+            print(f"{recuo}└── {codigo} {item.descricao} ... "
+                  f"{quantidade:g} {item.unidade}  [nível {nivel}]")
+        for filho, qtd in self.componentes(codigo).items():
+            self.imprimir_arvore(filho, nivel + 1, qtd)
