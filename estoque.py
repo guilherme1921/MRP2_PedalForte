@@ -65,3 +65,26 @@ class Estoque:
             "documento": documento,
         })
         self.salvar()
+
+    def kardex(self, codigo):
+        """Lista os movimentos de um item, em ordem de registro."""
+        return [m for m in self.movimentos if m["codigo"] == codigo]
+
+    def abaixo_da_seguranca(self, codigo):
+        """True se o saldo está abaixo do estoque de segurança (RF05)."""
+        item = self.cadastro.buscar(codigo)
+        return self.saldo(codigo) < item.estoque_seguranca
+
+def imprimir_kardex(estoque, codigo):
+    item = estoque.cadastro.buscar(codigo)
+    print(f"\nKARDEX - {codigo} {item.descricao} ({item.unidade})")
+    print(f"{'Data':<12} {'Tipo':<8} {'Qtde':>8} {'Saldo':>8}  Documento")
+    for m in estoque.kardex(codigo):
+        qtd = float(m["quantidade"])
+        print(f"{m['data']:<12} {m['tipo']:<8} {qtd:>+8g} "
+              f"{float(m['saldo']):>8g}  {m['documento']}")
+    saldo = estoque.saldo(codigo)
+    print(f"\nSaldo atual: {saldo:g} {item.unidade}")
+    if estoque.abaixo_da_seguranca(codigo):
+        print(f"ALERTA: saldo ({saldo:g} {item.unidade}) abaixo do estoque "
+              f"de segurança ({item.estoque_seguranca:g} {item.unidade}).")
