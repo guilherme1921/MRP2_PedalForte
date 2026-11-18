@@ -59,3 +59,44 @@ class Estrutura:
                   f"{quantidade:g} {item.unidade}  [nível {nivel}]")
         for filho, qtd in self.componentes(codigo).items():
             self.imprimir_arvore(filho, nivel + 1, qtd)
+
+def tela_adicionar(estrutura):
+    from utils import ler_float, ler_texto
+    pai = ler_texto("Código do item pai: ").upper()
+    filho = ler_texto("Código do componente: ").upper()
+    qtd = ler_float("Quantidade por unidade: ", minimo=0.0001)
+    try:
+        estrutura.adicionar_componente(pai, filho, qtd)
+        print(f"Componente {filho} adicionado a {pai}.")
+    except ValueError as erro:
+        print(f"ERRO: {erro}.")
+
+
+def tela_exibir(estrutura):
+    from utils import ler_texto
+    codigo = ler_texto("Código do produto: ").upper()
+    if estrutura.cadastro.buscar(codigo) is None:
+        print(f"ERRO: item {codigo} não encontrado.")
+        return
+    estrutura.imprimir_arvore(codigo)
+
+
+def menu_estrutura(estrutura):
+    """Submenu da BOM, chamado pelo menu principal."""
+    while True:
+        print("\n--- ESTRUTURA DE PRODUTO (BOM) ---")
+        print("1. Adicionar componente  2. Exibir árvore  0. Voltar")
+        opcao = input("Escolha uma opção: ").strip()
+        if opcao == "1":
+            tela_adicionar(estrutura)
+        elif opcao == "2":
+            tela_exibir(estrutura)
+        elif opcao == "0":
+            return
+        else:
+            print("ERRO: opção inválida.")
+
+
+if __name__ == "__main__":
+    from itens import CadastroItens
+    menu_estrutura(Estrutura(CadastroItens()))
