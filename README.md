@@ -23,7 +23,7 @@ Programação em Python (CEFET-MG, Campus Divinópolis).
 Requisito: Python 3.10 ou superior.
 
 ```
-git clone https://github.com/SEU-USUARIO/MRP2_PedalForte.git
+git clone https://github.com/guilherme1921/MRP2_PedalForte.git
 cd MRP2_PedalForte
 python itens.py      # cadastro de itens
 python estrutura.py  # estrutura de produto (BOM)
