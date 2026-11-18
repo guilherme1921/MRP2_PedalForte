@@ -88,3 +88,57 @@ def imprimir_kardex(estoque, codigo):
     if estoque.abaixo_da_seguranca(codigo):
         print(f"ALERTA: saldo ({saldo:g} {item.unidade}) abaixo do estoque "
               f"de segurança ({item.estoque_seguranca:g} {item.unidade}).")
+
+def tela_movimentar(estoque):
+    from utils import ler_float, ler_texto
+    codigo = ler_texto("Código do item: ").upper()
+    if estoque.cadastro.buscar(codigo) is None:
+        print(f"ERRO: item {codigo} não encontrado.")
+        return
+    letra = ler_texto("Tipo [E]ntrada [S]aída [A]juste: ").upper()
+    tipos = {"E": "ENTRADA", "S": "SAIDA", "A": "AJUSTE"}
+    if letra not in tipos:
+        print("ERRO: tipo inválido.")
+        return
+    tipo = tipos[letra]
+    if tipo == "AJUSTE":
+        quantidade = ler_float("Quantidade (negativa para reduzir): ",
+                               minimo=-1e12)
+    else:
+        quantidade = ler_float("Quantidade: ", minimo=0.0001)
+    documento = ler_texto("Documento/motivo: ")
+    try:
+        estoque.movimentar(codigo, tipo, quantidade, documento)
+        print(f"Movimento registrado. Saldo atual: {estoque.saldo(codigo):g}")
+    except ValueError as erro:
+        print(f"ERRO: {erro}. Operação cancelada.")
+
+
+def tela_kardex(estoque):
+    from utils import ler_texto
+    codigo = ler_texto("Código do item: ").upper()
+    if estoque.cadastro.buscar(codigo) is None:
+        print(f"ERRO: item {codigo} não encontrado.")
+        return
+    imprimir_kardex(estoque, codigo)
+
+
+def menu_estoque(estoque):
+    """Submenu de estoque, chamado pelo menu principal."""
+    while True:
+        print("\n--- ESTOQUE ---")
+        print("1. Movimentar  2. Saldo e kardex  0. Voltar")
+        opcao = input("Escolha uma opção: ").strip()
+        if opcao == "1":
+            tela_movimentar(estoque)
+        elif opcao == "2":
+            tela_kardex(estoque)
+        elif opcao == "0":
+            return
+        else:
+            print("ERRO: opção inválida.")
+
+
+if __name__ == "__main__":
+    from itens import CadastroItens
+    menu_estoque(Estoque(CadastroItens()))
