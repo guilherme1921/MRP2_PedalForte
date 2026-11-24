@@ -1,46 +1,50 @@
-"""Cadastro de itens (PA, SA e MP) - RF02, RN01."""
-
 from persistencia import carregar_json, salvar_json
-from utils import (codigo_valido, formatar_moeda, ler_float, ler_inteiro,
-                   ler_texto)
+from utils import codigo_validado
 
-ARQUIVO = "itens.json"
-CAMPOS_ALTERAVEIS = {
-    "1": ("descricao", "Descrição"),
-    "2": ("unidade", "Unidade de medida"),
-    "3": ("custo_unitario", "Custo unitário"),
-    "4": ("lead_time", "Lead time (semanas)"),
-    "5": ("estoque_seguranca", "Estoque de segurança"),
-    "6": ("lote_minimo", "Lote mínimo"),
-}
+
+def deduzir_tipo(codigo):
+    codigo_limpo = codigo.strip().upper()
+    if not codigo_validado(codigo_limpo):
+        raise ValueError("Código inválido. Use o formato PA-001, SA-010 ou MP-201.")
+    return codigo_limpo[:2]
 
 
 class Item:
-    """Representa um item: produto acabado, semiacabado ou matéria-prima."""
+    def __init__(
+        self,
+        codigo,
+        descricao,
+        unidade,
+        custo_unitario=0.0,
+        lead_time=0,
+        estoque_seguranca=0.0,
+        lote_minimo=1.0,
+    ):
+        tipo_deduzido = deduzir_tipo(codigo)
+        codigo_formatado = codigo.strip().upper()
+        descricao_limpa = descricao.strip()
+        unidade_limpa = unidade.strip()
 
-    def __init__(self, codigo, descricao, unidade, custo_unitario,
-                 lead_time, estoque_seguranca, lote_minimo):
-        self.codigo = codigo
-        self.descricao = descricao
-        self.unidade = unidade
-        self.custo_unitario = custo_unitario
-        self.lead_time = lead_time
-        self.estoque_seguranca = estoque_seguranca
-        self.lote_minimo = lote_minimo
+        if not descricao_limpa:
+            raise ValueError("A descrição do item não pode ficar vazia.")
+        if not unidade_limpa:
+            raise ValueError("A unidade de medida não pode ficar vazia.")
+        if custo_unitario < 0 or lead_time < 0 or estoque_seguranca < 0 or lote_minimo <= 0:
+            raise ValueError("Valores numéricos inválidos para o item.")
 
-    @property
-    def tipo(self):
-        """O tipo (PA, SA ou MP) vem do prefixo do código."""
-        return self.codigo[:2]
-
-    @property
-    def fabricado(self):
-        """PA e SA são fabricados; MP é comprada."""
-        return self.tipo in ("PA", "SA")
+        self.codigo = codigo_formatado
+        self.tipo = tipo_deduzido
+        self.descricao = descricao_limpa
+        self.unidade = unidade_limpa
+        self.custo_unitario = float(custo_unitario)
+        self.lead_time = int(lead_time)
+        self.estoque_seguranca = float(estoque_seguranca)
+        self.lote_minimo = float(lote_minimo)
 
     def to_dict(self):
         return {
             "codigo": self.codigo,
+            "tipo": self.tipo,
             "descricao": self.descricao,
             "unidade": self.unidade,
             "custo_unitario": self.custo_unitario,
@@ -51,118 +55,100 @@ class Item:
 
     @classmethod
     def from_dict(cls, dados):
-        return cls(**dados)
+        return cls(
+            codigo=dados["codigo"],
+            descricao=dados["descricao"],
+            unidade=dados["unidade"],
+            custo_unitario=dados.get("custo_unitario", 0.0),
+            lead_time=dados.get("lead_time", 0),
+            estoque_seguranca=dados.get("estoque_seguranca", 0.0),
+            lote_minimo=dados.get("lote_minimo", 1.0),
+        )
 
 
 class CadastroItens:
-    """Guarda todos os itens em um dicionário {código: Item} e persiste em JSON."""
-
-    def __init__(self):
+    def __init__(self, itens=None):
         self.itens = {}
-        self.carregar()
-
-    def carregar(self):
-        dados = carregar_json(ARQUIVO)
-        self.itens = {cod: Item.from_dict(d) for cod, d in dados.items()}
-
-    def salvar(self):
-        salvar_json(ARQUIVO, {c: i.to_dict() for c, i in self.itens.items()})
+        if itens:
+            for item in itens.values():
+                self.cadastrar(item)
 
     def cadastrar(self, item):
-        if not codigo_valido(item.codigo):
-            raise ValueError("código inválido; use o formato Tipo-Número (ex.: PA-001)")
+        if not isinstance(item, Item):
+            raise ValueError("O objeto informado deve ser uma instância de Item.")
         if item.codigo in self.itens:
-            raise ValueError(f"o código {item.codigo} já está cadastrado")
+            raise ValueError(f"Já existe um item cadastrado com o código {item.codigo}.")
         self.itens[item.codigo] = item
-        self.salvar()
 
-    def buscar(self, codigo):
-        return self.itens.get(codigo)
+    def obter(self, codigo):
+        codigo_formatado = codigo.strip().upper()
+        if codigo_formatado not in self.itens:
+            raise ValueError(f"Item {codigo_formatado} não encontrado.")
+        return self.itens[codigo_formatado]
 
-    def listar(self):
-        return [self.itens[c] for c in sorted(self.itens)]
+    def listar(self, tipo=None):
+        tipo_filtro = tipo.strip().upper() if tipo else None
+        if tipo_filtro and tipo_filtro not in ("PA", "SA", "MP"):
+            raise ValueError("Tipo inválido para filtro. Use PA, SA ou MP.")
+        itens_ordenados = sorted(self.itens.values(), key=lambda item: item.codigo)
+        if not tipo_filtro:
+            return itens_ordenados
+        return [item for item in itens_ordenados if item.tipo == tipo_filtro]
 
-    def alterar(self, codigo, campo, valor):
-        item = self.buscar(codigo)
-        if item is None:
-            raise ValueError(f"item {codigo} não encontrado")
-        setattr(item, campo, valor)
-        self.salvar()
+    def alterar(
+        self,
+        codigo,
+        descricao=None,
+        unidade=None,
+        custo_unitario=None,
+        lead_time=None,
+        estoque_seguranca=None,
+        lote_minimo=None,
+    ):
+        item = self.obter(codigo)
 
+        if descricao is not None:
+            descricao_limpa = descricao.strip()
+            if not descricao_limpa:
+                raise ValueError("A descrição do item não pode ficar vazia.")
+            item.descricao = descricao_limpa
 
-def tela_cadastrar(cadastro):
-    codigo = ler_texto("Código (ex.: PA-001): ").upper()
-    if not codigo_valido(codigo):
-        print("ERRO: use o formato Tipo-Número (PA-001, SA-020, MP-201).")
-        return
-    if cadastro.buscar(codigo):
-        print(f"ERRO: o código {codigo} já existe.")
-        return
-    item = Item(
-        codigo=codigo,
-        descricao=ler_texto("Descrição: "),
-        unidade=ler_texto("Unidade de medida (un, m, L...): "),
-        custo_unitario=ler_float("Custo unitário: "),
-        lead_time=ler_inteiro("Lead time (semanas): "),
-        estoque_seguranca=ler_float("Estoque de segurança: "),
-        lote_minimo=ler_float("Lote mínimo: "),
-    )
-    cadastro.cadastrar(item)
-    print(f"Item {codigo} cadastrado ({item.tipo}).")
+        if unidade is not None:
+            unidade_limpa = unidade.strip()
+            if not unidade_limpa:
+                raise ValueError("A unidade de medida não pode ficar vazia.")
+            item.unidade = unidade_limpa
 
+        if custo_unitario is not None:
+            if custo_unitario < 0:
+                raise ValueError("O custo unitário não pode ser negativo.")
+            item.custo_unitario = float(custo_unitario)
 
-def tela_listar(cadastro):
-    itens = cadastro.listar()
-    if not itens:
-        print("Nenhum item cadastrado.")
-        return
-    print(f"{'Código':<8} {'Descrição':<28} {'Un':<4} {'Custo':>12} "
-          f"{'LT':>3} {'ES':>6} {'Lote':>6}")
-    for i in itens:
-        print(f"{i.codigo:<8} {i.descricao:<28} {i.unidade:<4} "
-              f"{formatar_moeda(i.custo_unitario):>12} {i.lead_time:>3} "
-              f"{i.estoque_seguranca:>6g} {i.lote_minimo:>6g}")
+        if lead_time is not None:
+            if lead_time < 0:
+                raise ValueError("O lead time não pode ser negativo.")
+            item.lead_time = int(lead_time)
 
+        if estoque_seguranca is not None:
+            if estoque_seguranca < 0:
+                raise ValueError("O estoque de segurança não pode ser negativo.")
+            item.estoque_seguranca = float(estoque_seguranca)
 
-def tela_alterar(cadastro):
-    codigo = ler_texto("Código do item a alterar: ").upper()
-    if cadastro.buscar(codigo) is None:
-        print(f"ERRO: item {codigo} não encontrado.")
-        return
-    for chave, (_, rotulo) in CAMPOS_ALTERAVEIS.items():
-        print(f"  {chave}. {rotulo}")
-    escolha = ler_texto("Campo a alterar: ")
-    if escolha not in CAMPOS_ALTERAVEIS:
-        print("ERRO: opção inválida.")
-        return
-    campo, rotulo = CAMPOS_ALTERAVEIS[escolha]
-    if campo in ("descricao", "unidade"):
-        valor = ler_texto(f"Novo valor de {rotulo}: ")
-    elif campo == "lead_time":
-        valor = ler_inteiro(f"Novo valor de {rotulo}: ")
-    else:
-        valor = ler_float(f"Novo valor de {rotulo}: ")
-    cadastro.alterar(codigo, campo, valor)
-    print("Item alterado.")
+        if lote_minimo is not None:
+            if lote_minimo <= 0:
+                raise ValueError("O lote mínimo deve ser maior que zero.")
+            item.lote_minimo = float(lote_minimo)
 
+        return item
 
-def menu_itens(cadastro):
-    """Submenu de itens, que será chamado pelo menu principal."""
-    while True:
-        print("\n--- ITENS ---")
-        print("1. Cadastrar  2. Listar  3. Alterar  0. Voltar")
-        opcao = input("Escolha uma opção: ").strip()
-        if opcao == "1":
-            tela_cadastrar(cadastro)
-        elif opcao == "2":
-            tela_listar(cadastro)
-        elif opcao == "3":
-            tela_alterar(cadastro)
-        elif opcao == "0":
-            return
-        else:
-            print("ERRO: opção inválida.")
+    def salvar(self, arquivo="itens.json"):
+        dados = {codigo: item.to_dict() for codigo, item in self.itens.items()}
+        salvar_json(arquivo, dados)
 
-
-if __name__ == "__main__":
-    menu_itens(CadastroItens())
+    def carregar(self, arquivo="itens.json"):
+        dados = carregar_json(arquivo, {})
+        self.itens.clear()
+        for codigo, info in dados.items():
+            registro = dict(info)
+            registro.setdefault("codigo", codigo)
+            self.cadastrar(Item.from_dict(registro))
