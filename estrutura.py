@@ -1,102 +1,149 @@
-"""Estrutura de produto (BOM) em até 3 níveis - RF03, RN03."""
+"""Gerenciamento da estrutura de produto (BOM) e árvore indentada."""
 
 from persistencia import carregar_json, salvar_json
 
-ARQUIVO = "estrutura.json"
-
-# Regra RN03: quais tipos de componente cada tipo de pai pode ter.
 COMPONENTES_PERMITIDOS = {
-    "PA": ("SA", "MP"),
-    "SA": ("MP",),
-    "MP": (),
+    "PA": {"SA", "MP"},
+    "SA": {"MP"},
+    "MP": set(),
 }
 
 
 class Estrutura:
-    """Guarda a BOM em um dicionário {pai: {filho: quantidade}}."""
+    """Gerencia a estrutura de produto (BOM) em até três níveis."""
 
-    def __init__(self, cadastro_itens):
-        self.cadastro = cadastro_itens
+    def __init__(self, cadastro_itens=None, bom=None):
+        """Inicializa a estrutura com dicionário aninhado {pai: {filho: qtd}}."""
+        self.cadastro_itens = cadastro_itens
         self.bom = {}
-        self.carregar()
+        if bom:
+            for pai, componentes in bom.items():
+                for filho, quantidade in componentes.items():
+                    self.adicionar_componente(pai, filho, quantidade)
 
-    def carregar(self):
-        self.bom = carregar_json(ARQUIVO)
+    def adicionar_componente(self, codigo_pai, codigo_filho, quantidade):
+        """Adiciona ou atualiza um componente na BOM respeitando a RN03."""
+        pai = codigo_pai.strip().upper()
+        filho = codigo_filho.strip().upper()
+        qtd = float(quantidade)
 
-    def salvar(self):
-        salvar_json(ARQUIVO, self.bom)
+        if not pai or not filho:
+            raise ValueError("Os códigos do item pai e do componente são obrigatórios.")
+        if pai == filho:
+            raise ValueError("Um item não pode ser componente de si mesmo.")
+        if qtd <= 0:
+            raise ValueError("A quantidade do componente deve ser maior que zero.")
 
-    def adicionar_componente(self, pai, filho, quantidade):
-        """Adiciona (ou atualiza) um componente no item pai, validando RN03."""
-        item_pai = self.cadastro.buscar(pai)
-        item_filho = self.cadastro.buscar(filho)
-        if item_pai is None:
-            raise ValueError(f"item pai {pai} não encontrado")
-        if item_filho is None:
-            raise ValueError(f"item componente {filho} não encontrado")
-        if quantidade <= 0:
-            raise ValueError("a quantidade deve ser maior que zero")
-        if item_filho.tipo not in COMPONENTES_PERMITIDOS[item_pai.tipo]:
-            raise ValueError(
-                f"um {item_pai.tipo} não pode ter {item_filho.tipo} "
-                f"como componente (RN03)"
+        if self.cadastro_itens is not None:
+            item_pai = self.cadastro_itens.obter(pai)
+            item_filho = self.cadastro_itens.obter(filho)
+            tipos_validos = COMPONENTES_PERMITIDOS.get(item_pai.tipo, set())
+            if item_filho.tipo not in tipos_validos:
+                raise ValueError(
+                    f"Componente {filho} ({item_filho.tipo}) não permitido para {pai} ({item_pai.tipo})."
+                )
+        else:
+            tipo_pai = pai[:2]
+            tipo_filho = filho[:2]
+            tipos_validos = COMPONENTES_PERMITIDOS.get(tipo_pai, set())
+            if tipo_filho not in tipos_validos:
+                raise ValueError(
+                    f"Componente {filho} ({tipo_filho}) não permitido para {pai} ({tipo_pai})."
+                )
+
+        if pai not in self.bom:
+            self.bom[pai] = {}
+        self.bom[pai][filho] = qtd
+
+    def remover_componente(self, codigo_pai, codigo_filho):
+        """Remove um componente específico da estrutura de um item pai."""
+        pai = codigo_pai.strip().upper()
+        filho = codigo_filho.strip().upper()
+        if pai not in self.bom or filho not in self.bom[pai]:
+            raise ValueError(f"Componente {filho} não encontrado na estrutura de {pai}.")
+        del self.bom[pai][filho]
+        if not self.bom[pai]:
+            del self.bom[pai]
+
+    def obter_componentes(self, codigo_pai):
+        """Retorna o dicionário {filho: quantidade} de um item pai."""
+        pai = codigo_pai.strip().upper()
+        return dict(self.bom.get(pai, {}))
+
+    def explodir(self, codigo_item, quantidade_pai=1.0, nivel=0, visitados=None):
+        """Retorna a lista de componentes em profundidade com nível e quantidade acumulada."""
+        codigo = codigo_item.strip().upper()
+        qtd_acumulada = float(quantidade_pai)
+        caminho = set(visitados) if visitados else set()
+
+        if codigo in caminho:
+            raise ValueError(f"Ciclo detectado na estrutura envolvendo o item {codigo}.")
+        caminho.add(codigo)
+
+        descricao = codigo
+        unidade = "un"
+        if self.cadastro_itens is not None and codigo in self.cadastro_itens.itens:
+            item = self.cadastro_itens.itens[codigo]
+            descricao = item.descricao
+            unidade = item.unidade
+
+        linhas = [
+            {
+                "nivel": nivel,
+                "codigo": codigo,
+                "descricao": descricao,
+                "quantidade": qtd_acumulada,
+                "unidade": unidade,
+            }
+        ]
+
+        for filho, qtd_filho in self.obter_componentes(codigo).items():
+            linhas.extend(
+                self.explodir(
+                    filho,
+                    quantidade_pai=qtd_acumulada * float(qtd_filho),
+                    nivel=nivel + 1,
+                    visitados=caminho,
+                )
             )
-        self.bom.setdefault(pai, {})[filho] = quantidade
-        self.salvar()
+        return linhas
 
-    def componentes(self, pai):
-        """Devolve o dicionário {filho: quantidade} do pai (vazio se não tiver)."""
-        return self.bom.get(pai, {})
+    def formatar_arvore(self, codigo_item):
+        """Gera uma representação textual indentada da BOM a partir de um item."""
+        linhas_dados = self.explodir(codigo_item)
+        linhas_texto = []
+        niveis_por_codigo = {}
 
-    def imprimir_arvore(self, codigo, nivel=0, quantidade=None):
-        """Imprime a BOM indentada, de forma recursiva, indicando o nível."""
-        item = self.cadastro.buscar(codigo)
-        recuo = "    " * nivel
-        if nivel == 0:
-            print(f"{codigo} {item.descricao}  [nível 0]")
-        else:
-            print(f"{recuo}└── {codigo} {item.descricao} ... "
-                  f"{quantidade:g} {item.unidade}  [nível {nivel}]")
-        for filho, qtd in self.componentes(codigo).items():
-            self.imprimir_arvore(filho, nivel + 1, qtd)
+        for entrada in linhas_dados:
+            indentacao = "  " * entrada["nivel"]
+            qtd_formatada = f"{entrada['quantidade']:g}".replace(".", ",")
+            linhas_texto.append(
+                f"{indentacao}{entrada['codigo']} {entrada['descricao']} ..... "
+                f"{qtd_formatada} {entrada['unidade']}"
+            )
+            niveis_por_codigo.setdefault(entrada["codigo"], set()).add(entrada["nivel"])
 
-def tela_adicionar(estrutura):
-    from utils import ler_float, ler_texto
-    pai = ler_texto("Código do item pai: ").upper()
-    filho = ler_texto("Código do componente: ").upper()
-    qtd = ler_float("Quantidade por unidade: ", minimo=0.0001)
-    try:
-        estrutura.adicionar_componente(pai, filho, qtd)
-        print(f"Componente {filho} adicionado a {pai}.")
-    except ValueError as erro:
-        print(f"ERRO: {erro}.")
+        resumo_niveis = " | ".join(
+            f"{nivel} = {', '.join(sorted(cods))}"
+            for nivel, cods in sorted(
+                {
+                    n: [c for c, ns in niveis_por_codigo.items() if n in ns]
+                    for n in {n for ns in niveis_por_codigo.values() for n in ns}
+                }.items()
+            )
+        )
+        if resumo_niveis:
+            linhas_texto.append(f"Níveis: {resumo_niveis}")
+        return "\n".join(linhas_texto)
 
+    def salvar(self, arquivo="estrutura.json"):
+        """Grava a estrutura de produto (BOM) em JSON."""
+        salvar_json(arquivo, self.bom)
 
-def tela_exibir(estrutura):
-    from utils import ler_texto
-    codigo = ler_texto("Código do produto: ").upper()
-    if estrutura.cadastro.buscar(codigo) is None:
-        print(f"ERRO: item {codigo} não encontrado.")
-        return
-    estrutura.imprimir_arvore(codigo)
-
-
-def menu_estrutura(estrutura):
-    """Submenu da BOM, chamado pelo menu principal."""
-    while True:
-        print("\n--- ESTRUTURA DE PRODUTO (BOM) ---")
-        print("1. Adicionar componente  2. Exibir árvore  0. Voltar")
-        opcao = input("Escolha uma opção: ").strip()
-        if opcao == "1":
-            tela_adicionar(estrutura)
-        elif opcao == "2":
-            tela_exibir(estrutura)
-        elif opcao == "0":
-            return
-        else:
-            print("ERRO: opção inválida.")
-
-
-if __name__ == "__main__":
-    from itens import CadastroItens
-    menu_estrutura(Estrutura(CadastroItens()))
+    def carregar(self, arquivo="estrutura.json"):
+        """Carrega a estrutura de produto (BOM) a partir de JSON."""
+        dados = carregar_json(arquivo, {})
+        self.bom.clear()
+        for pai, componentes in dados.items():
+            for filho, quantidade in componentes.items():
+                self.adicionar_componente(pai, filho, quantidade)
