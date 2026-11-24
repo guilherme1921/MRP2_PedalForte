@@ -1,0 +1,29 @@
+{
+  "PA-001": {
+    "codigo": "PA-001",
+    "descricao": "Bicicleta",
+    "unidade": "un",
+    "custo_unitario": 100.0,
+    "lead_time": 1,
+    "estoque_seguranca": 1.0,
+    "lote_minimo": 0.0
+  },
+  "SA-010": {
+    "codigo": "SA-010",
+    "descricao": "Quadro",
+    "unidade": "un",
+    "custo_unitario": 190.0,
+    "lead_time": 2,
+    "estoque_seguranca": 3.0,
+    "lote_minimo": 1.0
+  },
+  "MP-100": {
+    "codigo": "MP-100",
+    "descricao": "Tubo",
+    "unidade": "m",
+    "custo_unitario": 120.0,
+    "lead_time": 3,
+    "estoque_seguranca": 20.0,
+    "lote_minimo": 1.0
+  }
+}
