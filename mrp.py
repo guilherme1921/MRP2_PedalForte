@@ -74,3 +74,34 @@ def calcular(self):
             }
 
         return resultado
+
+def resumo_tabela(self, resultado=None):
+        """Formata um resumo textual semana a semana das necessidades do MRP."""
+        dados = resultado if resultado is not None else self.calcular()
+        if not dados:
+            return "Nenhuma necessidade calculada no MRP."
+
+        semanas = self.mps.semanas
+        cabecalho_semanas = " | ".join(f"S{s}" for s in range(1, semanas + 1))
+        linhas = []
+
+        for codigo, info in dados.items():
+            linhas.append(
+                f"{codigo} (Saldo: {info['saldo_inicial']:g}, "
+                f"ES: {info['estoque_seguranca']:g}, LT: {info['lead_time']}s)"
+            )
+            linhas.append(f"  Semanas : {cabecalho_semanas}")
+            linhas.append(
+                "  Bruta   : "
+                + " | ".join(f"{info['necessidade_bruta'][s]:g}" for s in range(1, semanas + 1))
+            )
+            linhas.append(
+                "  Líquida : "
+                + " | ".join(f"{info['necessidade_liquida'][s]:g}" for s in range(1, semanas + 1))
+            )
+            linhas.append(
+                "  Liberar : "
+                + " | ".join(f"{info['liberacao_planejada'][s]:g}" for s in range(1, semanas + 1))
+            )
+
+        return "\n".join(linhas)
