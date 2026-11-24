@@ -1,51 +1,45 @@
-"""Leitura e gravação de arquivos JSON e CSV na pasta data/."""
+"""Leitura e gravação de arquivos: único ponto de acesso à pasta data/."""
 
 import csv
 import json
-import os
+from pathlib import Path
 
-PASTA_DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+PASTA_DADOS = Path(__file__).resolve().parent / "data"
 
+def caminho_arquivo(nome):
+    """Devolve o caminho de um arquivo dentro de data/, criando a pasta."""
+    PASTA_DADOS.mkdir(exist_ok=True)
+    return PASTA_DADOS / nome
 
-def _caminho(nome_arquivo):
-    """Monta o caminho do arquivo e cria a pasta data/ se não existir."""
-    os.makedirs(PASTA_DATA, exist_ok=True)
-    return os.path.join(PASTA_DATA, nome_arquivo)
-
-
-def carregar_json(nome_arquivo, padrao=None):
-    """Lê um JSON; se o arquivo não existir ou estiver corrompido, devolve o padrão."""
-    if padrao is None:
-        padrao = {}
-    caminho = _caminho(nome_arquivo)
-    if not os.path.exists(caminho):
+def carregar_json(nome, padrao):
+    """Lê um arquivo JSON; se ele não existir, devolve o valor padrão."""
+    caminho = caminho_arquivo(nome)
+    if not caminho.exists():
         return padrao
     try:
         with open(caminho, "r", encoding="utf-8") as arquivo:
             return json.load(arquivo)
-    except (json.JSONDecodeError, OSError):
-        print(f"AVISO: não foi possível ler {nome_arquivo}. Usando dados vazios.")
-        return padrao
+    except json.JSONDecodeError:
+        raise ValueError(f"o arquivo {nome} está corrompido ou mal formatado.")
 
-
-def salvar_json(nome_arquivo, dados):
-    """Grava os dados em JSON com acentos preservados e indentação."""
-    with open(_caminho(nome_arquivo), "w", encoding="utf-8") as arquivo:
+def salvar_json(nome, dados):
+    """Grava dados (dicionário ou lista) em um arquivo JSON legível."""
+    caminho = caminho_arquivo(nome)
+    with open(caminho, "w", encoding="utf-8") as arquivo:
         json.dump(dados, arquivo, ensure_ascii=False, indent=2)
 
-
-def carregar_csv(nome_arquivo):
-    """Lê um CSV e devolve uma lista de dicionários (uma por linha)."""
-    caminho = _caminho(nome_arquivo)
-    if not os.path.exists(caminho):
+def carregar_csv(nome):
+    """Lê um CSV separado por ponto e vírgula e devolve lista de dicionários."""
+    caminho = caminho_arquivo(nome)
+    if not caminho.exists():
         return []
     with open(caminho, "r", encoding="utf-8", newline="") as arquivo:
         return list(csv.DictReader(arquivo, delimiter=";"))
 
-
-def salvar_csv(nome_arquivo, linhas, campos):
-    """Grava uma lista de dicionários em CSV, usando 'campos' como cabeçalho."""
-    with open(_caminho(nome_arquivo), "w", encoding="utf-8", newline="") as arquivo:
+def salvar_csv(nome, campos, linhas):
+    """Grava uma lista de dicionários em CSV, com ; como separador."""
+    caminho = caminho_arquivo(nome)
+    with open(caminho, "w", encoding="utf-8", newline="") as arquivo:
         escritor = csv.DictWriter(arquivo, fieldnames=campos, delimiter=";")
         escritor.writeheader()
         escritor.writerows(linhas)
