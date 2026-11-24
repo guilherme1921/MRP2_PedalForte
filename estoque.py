@@ -1,144 +1,133 @@
-"""Movimentações de estoque, saldo e kardex - RF04, RF05, RN02, RN10."""
+"""Controle de movimentações de estoque, saldo e histórico kardex."""
 
+from datetime import datetime
 from persistencia import carregar_csv, salvar_csv
-from utils import data_hoje
-
-ARQUIVO = "movimentos.csv"
-CAMPOS = ["data", "codigo", "tipo", "quantidade", "saldo", "documento"]
-TIPOS = ("ENTRADA", "SAIDA", "AJUSTE")
 
 
 class Estoque:
-    """Guarda o kardex (lista de movimentos). O saldo é sempre o do último
-    movimento do item. Movimentos nunca são excluídos (RN10)."""
+    """Gerencia o kardex e o saldo dos itens em memória e em CSV."""
 
-    def __init__(self, cadastro_itens):
-        self.cadastro = cadastro_itens
+    CAMPOS_CSV = ["data", "codigo", "tipo", "quantidade", "saldo", "documento"]
+
+    def __init__(self, cadastro_itens=None, movimentos=None):
+        """Inicializa o estoque com histórico de movimentos."""
+        self.cadastro_itens = cadastro_itens
         self.movimentos = []
-        self.carregar()
+        if movimentos:
+            for mov in movimentos:
+                self._registrar_carregado(mov)
 
-    def carregar(self):
-        self.movimentos = carregar_csv(ARQUIVO)
+    def _registrar_carregado(self, registro):
+        """Insere na lista um movimento já lido do histórico sem alterar o saldo."""
+        codigo = str(registro["codigo"]).strip().upper()
+        tipo = str(registro["tipo"]).strip().upper()
+        quantidade = float(registro["quantidade"])
+        saldo_apos = float(registro["saldo"])
+        data = str(registro.get("data", "")).strip()
+        documento = str(registro.get("documento", "")).strip()
 
-    def salvar(self):
-        salvar_csv(ARQUIVO, self.movimentos, CAMPOS)
+        if saldo_apos < 0:
+            raise ValueError(f"Saldo negativo detectado no histórico de {codigo}.")
 
-    def saldo(self, codigo):
-        """Saldo atual do item: o saldo do último movimento dele."""
+        self.movimentos.append(
+            {
+                "data": data,
+                "codigo": codigo,
+                "tipo": tipo,
+                "quantidade": quantidade,
+                "saldo": saldo_apos,
+                "documento": documento,
+            }
+        )
+
+    def saldo(self, codigo_item):
+        """Retorna o saldo atual percorrendo o kardex de trás para frente."""
+        codigo = codigo_item.strip().upper()
         for mov in reversed(self.movimentos):
             if mov["codigo"] == codigo:
                 return float(mov["saldo"])
         return 0.0
 
-    def movimentar(self, codigo, tipo, quantidade, documento, data=None):
-        """Registra um movimento e atualiza o saldo.
-        ENTRADA soma, SAIDA subtrai, AJUSTE aceita valor positivo ou negativo."""
-        if self.cadastro.buscar(codigo) is None:
-            raise ValueError(f"item {codigo} não encontrado")
-        if tipo not in TIPOS:
-            raise ValueError("tipo inválido (use ENTRADA, SAIDA ou AJUSTE)")
-        if quantidade == 0:
-            raise ValueError("a quantidade não pode ser zero")
-        if tipo != "AJUSTE" and quantidade < 0:
-            raise ValueError("a quantidade deve ser positiva")
+    def kardex(self, codigo_item):
+        """Retorna o histórico do item e informa se está abaixo do estoque de segurança."""
+        codigo = codigo_item.strip().upper()
+        historico = [mov for mov in self.movimentos if mov["codigo"] == codigo]
+        saldo_atual = self.saldo(codigo)
+        alerta_seguranca = False
+        estoque_seguranca = 0.0
+
+        if self.cadastro_itens is not None and codigo in self.cadastro_itens.itens:
+            item = self.cadastro_itens.itens[codigo]
+            estoque_seguranca = float(item.estoque_seguranca)
+            alerta_seguranca = saldo_atual < estoque_seguranca
+
+        return {
+            "codigo": codigo,
+            "saldo": saldo_atual,
+            "estoque_seguranca": estoque_seguranca,
+            "alerta_seguranca": alerta_seguranca,
+            "movimentos": historico,
+        }
+
+    def movimentar(self, codigo_item, tipo, quantidade, documento="", data=None):
+        """Registra entrada, saída ou ajuste bloqueando saldo negativo antes de gravar."""
+        codigo = codigo_item.strip().upper()
+        tipo_mov = tipo.strip().upper()
+        qtd = float(quantidade)
+        doc = str(documento).strip()
+        data_mov = str(data).strip() if data else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        if not codigo:
+            raise ValueError("O código do item é obrigatório.")
+        if self.cadastro_itens is not None:
+            self.cadastro_itens.obter(codigo)
+        if tipo_mov not in ("ENTRADA", "SAIDA", "AJUSTE"):
+            raise ValueError("Tipo de movimento inválido. Use ENTRADA, SAIDA ou AJUSTE.")
+        if not doc:
+            raise ValueError("O documento ou motivo do movimento é obrigatório.")
 
         saldo_atual = self.saldo(codigo)
-        if tipo == "ENTRADA":
-            variacao = quantidade
-        elif tipo == "SAIDA":
-            variacao = -quantidade
-        else:
-            variacao = quantidade
 
-        novo_saldo = saldo_atual + variacao
-        if novo_saldo < 0:  # RN02
+        if tipo_mov == "ENTRADA":
+            if qtd <= 0:
+                raise ValueError("A quantidade de entrada deve ser maior que zero.")
+            novo_saldo = saldo_atual + qtd
+            qtd_registrada = qtd
+        elif tipo_mov == "SAIDA":
+            if qtd <= 0:
+                raise ValueError("A quantidade de saída deve ser maior que zero.")
+            novo_saldo = saldo_atual - qtd
+            qtd_registrada = -qtd
+        else:
+            if qtd == 0:
+                raise ValueError("A quantidade de ajuste não pode ser zero.")
+            novo_saldo = saldo_atual + qtd
+            qtd_registrada = qtd
+
+        if novo_saldo < 0:
             raise ValueError(
-                f"saldo insuficiente (saldo atual: {saldo_atual:g})"
+                f"Saldo insuficiente para {codigo}. Saldo atual: {saldo_atual:g}, "
+                f"saldo resultante seria: {novo_saldo:g}."
             )
 
-        self.movimentos.append({
-            "data": data or data_hoje(),
+        movimento = {
+            "data": data_mov,
             "codigo": codigo,
-            "tipo": tipo,
-            "quantidade": f"{variacao:g}",
-            "saldo": f"{novo_saldo:g}",
-            "documento": documento,
-        })
-        self.salvar()
+            "tipo": tipo_mov,
+            "quantidade": qtd_registrada,
+            "saldo": novo_saldo,
+            "documento": doc,
+        }
+        self.movimentos.append(movimento)
+        return movimento
 
-    def kardex(self, codigo):
-        """Lista os movimentos de um item, em ordem de registro."""
-        return [m for m in self.movimentos if m["codigo"] == codigo]
+    def salvar(self, arquivo="movimentos.csv"):
+        """Grava o histórico do kardex em arquivo CSV."""
+        salvar_csv(arquivo, self.movimentos, self.CAMPOS_CSV)
 
-    def abaixo_da_seguranca(self, codigo):
-        """True se o saldo está abaixo do estoque de segurança (RF05)."""
-        item = self.cadastro.buscar(codigo)
-        return self.saldo(codigo) < item.estoque_seguranca
-
-def imprimir_kardex(estoque, codigo):
-    item = estoque.cadastro.buscar(codigo)
-    print(f"\nKARDEX - {codigo} {item.descricao} ({item.unidade})")
-    print(f"{'Data':<12} {'Tipo':<8} {'Qtde':>8} {'Saldo':>8}  Documento")
-    for m in estoque.kardex(codigo):
-        qtd = float(m["quantidade"])
-        print(f"{m['data']:<12} {m['tipo']:<8} {qtd:>+8g} "
-              f"{float(m['saldo']):>8g}  {m['documento']}")
-    saldo = estoque.saldo(codigo)
-    print(f"\nSaldo atual: {saldo:g} {item.unidade}")
-    if estoque.abaixo_da_seguranca(codigo):
-        print(f"ALERTA: saldo ({saldo:g} {item.unidade}) abaixo do estoque "
-              f"de segurança ({item.estoque_seguranca:g} {item.unidade}).")
-
-def tela_movimentar(estoque):
-    from utils import ler_float, ler_texto
-    codigo = ler_texto("Código do item: ").upper()
-    if estoque.cadastro.buscar(codigo) is None:
-        print(f"ERRO: item {codigo} não encontrado.")
-        return
-    letra = ler_texto("Tipo [E]ntrada [S]aída [A]juste: ").upper()
-    tipos = {"E": "ENTRADA", "S": "SAIDA", "A": "AJUSTE"}
-    if letra not in tipos:
-        print("ERRO: tipo inválido.")
-        return
-    tipo = tipos[letra]
-    if tipo == "AJUSTE":
-        quantidade = ler_float("Quantidade (negativa para reduzir): ",
-                               minimo=-1e12)
-    else:
-        quantidade = ler_float("Quantidade: ", minimo=0.0001)
-    documento = ler_texto("Documento/motivo: ")
-    try:
-        estoque.movimentar(codigo, tipo, quantidade, documento)
-        print(f"Movimento registrado. Saldo atual: {estoque.saldo(codigo):g}")
-    except ValueError as erro:
-        print(f"ERRO: {erro}. Operação cancelada.")
-
-
-def tela_kardex(estoque):
-    from utils import ler_texto
-    codigo = ler_texto("Código do item: ").upper()
-    if estoque.cadastro.buscar(codigo) is None:
-        print(f"ERRO: item {codigo} não encontrado.")
-        return
-    imprimir_kardex(estoque, codigo)
-
-
-def menu_estoque(estoque):
-    """Submenu de estoque, chamado pelo menu principal."""
-    while True:
-        print("\n--- ESTOQUE ---")
-        print("1. Movimentar  2. Saldo e kardex  0. Voltar")
-        opcao = input("Escolha uma opção: ").strip()
-        if opcao == "1":
-            tela_movimentar(estoque)
-        elif opcao == "2":
-            tela_kardex(estoque)
-        elif opcao == "0":
-            return
-        else:
-            print("ERRO: opção inválida.")
-
-
-if __name__ == "__main__":
-    from itens import CadastroItens
-    menu_estoque(Estoque(CadastroItens()))
+    def carregar(self, arquivo="movimentos.csv"):
+        """Carrega o histórico do kardex a partir de um arquivo CSV."""
+        registros = carregar_csv(arquivo)
+        self.movimentos.clear()
+        for registro in registros:
+            self._registrar_carregado(registro)
