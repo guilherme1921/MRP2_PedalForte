@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from persistencia import caminho_arquivo
 
 
-def _finalizar(figura, nome_arquivo, mostrar):
+def finalizar(figura, nome_arquivo, mostrar):
     """Salva a figura em data/, mostra na tela (se pedido) e a fecha."""
     caminho = caminho_arquivo(nome_arquivo)
     figura.savefig(caminho, dpi=120, bbox_inches="tight")
