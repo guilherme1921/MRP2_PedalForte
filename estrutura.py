@@ -70,8 +70,10 @@ class Estrutura:
         pai = codigo_pai.strip().upper()
         return dict(self.bom.get(pai, {}))
 
-    def explodir(self, codigo_item, quantidade_pai=1.0, nivel=0, visitados=None):
-        """Retorna a lista de componentes em profundidade com nível e quantidade acumulada."""
+    def explodir(self, codigo_item, quantidade_pai=1.0, nivel=0, visitados=None,
+                 quantidade_unitaria=1.0):
+        """Retorna os componentes em profundidade, com nível, quantidade acumulada
+        e quantidade por unidade do pai imediato."""
         codigo = codigo_item.strip().upper()
         qtd_acumulada = float(quantidade_pai)
         caminho = set(visitados) if visitados else set()
@@ -93,6 +95,7 @@ class Estrutura:
                 "codigo": codigo,
                 "descricao": descricao,
                 "quantidade": qtd_acumulada,
+                "quantidade_unitaria": float(quantidade_unitaria),
                 "unidade": unidade,
             }
         ]
@@ -104,6 +107,7 @@ class Estrutura:
                     quantidade_pai=qtd_acumulada * float(qtd_filho),
                     nivel=nivel + 1,
                     visitados=caminho,
+                    quantidade_unitaria=float(qtd_filho),
                 )
             )
         return linhas
@@ -116,7 +120,7 @@ class Estrutura:
 
         for entrada in linhas_dados:
             indentacao = "  " * entrada["nivel"]
-            qtd_formatada = f"{entrada['quantidade']:g}".replace(".", ",")
+            qtd_formatada = f"{entrada['quantidade_unitaria']:g}".replace(".", ",")
             linhas_texto.append(
                 f"{indentacao}{entrada['codigo']} {entrada['descricao']} ..... "
                 f"{qtd_formatada} {entrada['unidade']}"

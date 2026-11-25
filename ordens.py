@@ -1,164 +1,254 @@
-"""Gerenciamento de ordens de produção (OP) e ordens de compra (OC)."""
+"""Ordens de produção (OP) e de compra (OC): status, firmar, liberar e apontar."""
 
 from datetime import datetime
 from persistencia import carregar_json, salvar_json
 
+TIPOS_VALIDOS = ("OP", "OC")
+STATUS_VALIDOS = ("PLANEJADA", "ATRASADA", "FIRME", "LIBERADA", "ENCERRADA")
+STATUS_NAO_FIRMES = ("PLANEJADA", "ATRASADA")
+STATUS_RECEBIMENTO = ("FIRME", "LIBERADA")
 
-class GerenciadorOrdens:
-    """Controla ordens de produção e compra, status e persistência em JSON."""
 
-    STATUS_VALIDOS = ("PLANEJADA", "LIBERADA", "CONCLUIDA", "CANCELADA")
-    TIPOS_VALIDOS = ("OP", "OC")
+class Ordem:
+    """Representa uma ordem de produção (OP) ou de compra (OC)."""
 
-    def __init__(self, cadastro_itens=None, estoque=None, ordens=None):
-        """Inicializa o gerenciador de ordens com referências opcionais."""
-        self.cadastro_itens = cadastro_itens
-        self.estoque = estoque
-        self.ordens = []
-        if ordens:
-            for ordem in ordens:
-                self._registrar_carregada(ordem)
+    def __init__(self, id_ordem, tipo, codigo_item, quantidade,
+                 semana_liberacao, semana_entrega, status="PLANEJADA",
+                 data_criacao=None):
+        """Valida os dados e cria a ordem."""
+        tipo_limpo = str(tipo).strip().upper()
+        status_limpo = str(status).strip().upper()
 
-    def _registrar_carregada(self, ordem):
-        """Valida e adiciona em memória uma ordem já carregada de arquivo."""
-        codigo_ordem = str(ordem.get("id", "")).strip().upper()
-        tipo = str(ordem.get("tipo", "")).strip().upper()
-        codigo_item = str(ordem.get("codigo_item", "")).strip().upper()
-        quantidade = float(ordem.get("quantidade", 0))
-        semana = int(ordem.get("semana", 1))
-        status = str(ordem.get("status", "PLANEJADA")).strip().upper()
-        data_criacao = str(ordem.get("data_criacao", "")).strip()
-
-        if not codigo_ordem:
-            raise ValueError("O ID da ordem é obrigatório.")
-        if tipo not in self.TIPOS_VALIDOS:
-            raise ValueError(f"Tipo de ordem inválido: {tipo}.")
-        if not codigo_item:
-            raise ValueError("O código do item da ordem é obrigatório.")
-        if quantidade <= 0:
+        if tipo_limpo not in TIPOS_VALIDOS:
+            raise ValueError("Tipo de ordem inválido. Use OP ou OC.")
+        if status_limpo not in STATUS_VALIDOS:
+            raise ValueError(f"Status inválido: {status_limpo}.")
+        if float(quantidade) <= 0:
             raise ValueError("A quantidade da ordem deve ser maior que zero.")
-        if semana <= 0:
-            raise ValueError("A semana da ordem deve ser maior que zero.")
-        if status not in self.STATUS_VALIDOS:
-            raise ValueError(f"Status de ordem inválido: {status}.")
+        if int(semana_entrega) < 1:
+            raise ValueError("A semana de entrega deve ser maior ou igual a 1.")
 
-        self.ordens.append(
-            {
-                "id": codigo_ordem,
-                "tipo": tipo,
-                "codigo_item": codigo_item,
-                "quantidade": quantidade,
-                "semana": semana,
-                "status": status,
-                "data_criacao": data_criacao or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            }
+        self.id = str(id_ordem).strip().upper()
+        self.tipo = tipo_limpo
+        self.codigo_item = str(codigo_item).strip().upper()
+        self.quantidade = float(quantidade)
+        self.semana_liberacao = int(semana_liberacao)
+        self.semana_entrega = int(semana_entrega)
+        self.status = status_limpo
+        self.data_criacao = data_criacao or datetime.now().strftime("%d/%m/%Y")
+
+    def to_dict(self):
+        """Converte a ordem em dicionário para gravar em JSON."""
+        return {
+            "id": self.id,
+            "tipo": self.tipo,
+            "codigo_item": self.codigo_item,
+            "quantidade": self.quantidade,
+            "semana_liberacao": self.semana_liberacao,
+            "semana_entrega": self.semana_entrega,
+            "status": self.status,
+            "data_criacao": self.data_criacao,
+        }
+
+    @classmethod
+    def from_dict(cls, dados):
+        """Recria uma ordem a partir de um dicionário lido do JSON."""
+        return cls(
+            id_ordem=dados["id"],
+            tipo=dados["tipo"],
+            codigo_item=dados["codigo_item"],
+            quantidade=dados["quantidade"],
+            semana_liberacao=dados["semana_liberacao"],
+            semana_entrega=dados["semana_entrega"],
+            status=dados.get("status", "PLANEJADA"),
+            data_criacao=dados.get("data_criacao"),
         )
 
-    def criar_ordem(self, tipo, codigo_item, quantidade, semana, status="PLANEJADA"):
-        """Cria uma nova ordem (OP ou OC) com ID sequencial e valida o item."""
+
+class GerenciadorOrdens:
+    """Controla as ordens, seus status e o apontamento de produção."""
+
+    def __init__(self, cadastro_itens=None, estoque=None, estrutura=None):
+        """Guarda as dependências e inicia a lista de ordens e os contadores."""
+        self.cadastro_itens = cadastro_itens
+        self.estoque = estoque
+        self.estrutura = estrutura
+        self.ordens = []
+        self.contadores = {"OP": 0, "OC": 0}
+
+    def _proximo_id(self, tipo):
+        """Gera o próximo número sequencial (OP-0010, OC-0004...)."""
+        self.contadores[tipo] += 1
+        return f"{tipo}-{self.contadores[tipo]:04d}"
+
+    def criar_ordem(self, tipo, codigo_item, quantidade, semana_liberacao,
+                    semana_entrega, status="PLANEJADA"):
+        """Cria uma ordem com ID sequencial, validando o item e o tipo."""
         tipo_ordem = str(tipo).strip().upper()
         codigo = str(codigo_item).strip().upper()
-        qtd = float(quantidade)
-        sem = int(semana)
-        status_ordem = str(status).strip().upper()
-
-        if tipo_ordem not in self.TIPOS_VALIDOS:
-            raise ValueError("Tipo de ordem inválido. Use OP ou OC.")
-        if not codigo:
-            raise ValueError("O código do item é obrigatório.")
-        if qtd <= 0:
-            raise ValueError("A quantidade da ordem deve ser maior que zero.")
-        if sem <= 0:
-            raise ValueError("A semana da ordem deve ser maior que zero.")
-        if status_ordem not in self.STATUS_VALIDOS:
-            raise ValueError("Status da ordem inválido.")
 
         if self.cadastro_itens is not None:
-            self.cadastro_itens.obter(codigo)
+            item = self.cadastro_itens.obter(codigo)
+            if tipo_ordem == "OC" and item.tipo != "MP":
+                raise ValueError("Ordem de compra (OC) só vale para matéria-prima.")
+            if tipo_ordem == "OP" and item.tipo == "MP":
+                raise ValueError("Ordem de produção (OP) não vale para matéria-prima.")
 
-        numero = len(self.ordens) + 1
-        while any(o["id"] == f"{tipo_ordem}-{numero:04d}" for o in self.ordens):
-            numero += 1
-        novo_id = f"{tipo_ordem}-{numero:04d}"
-
-        ordem = {
-            "id": novo_id,
-            "tipo": tipo_ordem,
-            "codigo_item": codigo,
-            "quantidade": qtd,
-            "semana": sem,
-            "status": status_ordem,
-            "data_criacao": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        }
+        ordem = Ordem("PROVISORIO", tipo_ordem, codigo, quantidade,
+                      semana_liberacao, semana_entrega, status)
+        ordem.id = self._proximo_id(tipo_ordem)
         self.ordens.append(ordem)
         return ordem
 
-    def gerar_do_mrp(self, resultado_mrp):
-        """Gera ordens PLANEJADAS a partir da liberação planejada de cada item no MRP."""
-        criadas = []
-        for codigo_item, info in sorted(resultado_mrp.items()):
-            liberacao = info.get("liberacao_planejada", {})
-            tipo_ordem = "OC" if codigo_item.startswith("MP") else "OP"
-            if self.cadastro_itens is not None and codigo_item in self.cadastro_itens.itens:
-                item = self.cadastro_itens.itens[codigo_item]
-                tipo_ordem = "OC" if getattr(item, "tipo", "") == "MP" else "OP"
+    def buscar(self, id_ordem):
+        """Devolve a ordem com o ID informado."""
+        identificador = str(id_ordem).strip().upper()
+        for ordem in self.ordens:
+            if ordem.id == identificador:
+                return ordem
+        raise ValueError(f"Ordem {identificador} não encontrada.")
 
-            for semana, qtd in sorted(liberacao.items(), key=lambda par: int(par[0])):
-                quantidade = float(qtd)
-                if quantidade > 0:
-                    ordem = self.criar_ordem(
-                        tipo=tipo_ordem,
-                        codigo_item=codigo_item,
-                        quantidade=quantidade,
-                        semana=int(semana),
-                        status="PLANEJADA",
+    def listar(self, tipo=None, status=None):
+        """Lista as ordens, ordenadas pelo ID, com filtros opcionais."""
+        resultado = sorted(self.ordens, key=lambda ordem: ordem.id)
+        if tipo:
+            resultado = [o for o in resultado if o.tipo == tipo.strip().upper()]
+        if status:
+            resultado = [o for o in resultado if o.status == status.strip().upper()]
+        return resultado
+
+    def ordens_do_item(self, codigo_item):
+        """Devolve as ordens de um item."""
+        codigo = str(codigo_item).strip().upper()
+        return [ordem for ordem in self.ordens if ordem.codigo_item == codigo]
+
+    def apagar_planejadas(self):
+        """RN08: apaga as ordens não firmes (PLANEJADA e ATRASADA)."""
+        antes = len(self.ordens)
+        self.ordens = [o for o in self.ordens if o.status not in STATUS_NAO_FIRMES]
+        return antes - len(self.ordens)
+
+    def gerar_do_mrp(self, registros):
+        """RF09: recria as ordens planejadas a partir dos registros do MRP."""
+        self.apagar_planejadas()
+        criadas = []
+        for codigo, registro in registros.items():
+            tipo_ordem = "OC" if codigo.startswith("MP") else "OP"
+            for planejada in registro["ordens_planejadas"]:
+                atrasada = planejada["semana_liberacao"] < 1
+                criadas.append(
+                    self.criar_ordem(
+                        tipo_ordem,
+                        codigo,
+                        planejada["quantidade"],
+                        planejada["semana_liberacao"],
+                        planejada["semana_entrega"],
+                        "ATRASADA" if atrasada else "PLANEJADA",
                     )
-                    criadas.append(ordem)
+                )
         return criadas
 
-    def alterar_status(self, id_ordem, novo_status, documento=None):
-        """Atualiza o status de uma ordem e registra entrada no estoque ao concluir."""
-        identificador = str(id_ordem).strip().upper()
-        status_destino = str(novo_status).strip().upper()
+    def mensagens_excecao(self):
+        """RN07: mensagens para as ordens com liberação antes da semana 1."""
+        mensagens = []
+        for ordem in self.listar(status="ATRASADA"):
+            mensagens.append(
+                f"{ordem.id} ({ordem.codigo_item}): liberação na semana "
+                f"{ordem.semana_liberacao}, antes da semana 1."
+            )
+        return mensagens
 
-        if status_destino not in self.STATUS_VALIDOS:
-            raise ValueError(f"Status inválido: {status_destino}.")
+    def firmar(self, id_ordem):
+        """Passa a ordem de PLANEJADA/ATRASADA para FIRME."""
+        ordem = self.buscar(id_ordem)
+        if ordem.status not in STATUS_NAO_FIRMES:
+            raise ValueError(
+                f"Só é possível firmar ordem PLANEJADA ou ATRASADA "
+                f"(status atual: {ordem.status})."
+            )
+        ordem.status = "FIRME"
+        return ordem
 
-        ordem_alvo = None
-        for ordem in self.ordens:
-            if ordem["id"] == identificador:
-                ordem_alvo = ordem
-                break
+    def liberar(self, id_ordem):
+        """Passa a ordem de FIRME para LIBERADA."""
+        ordem = self.buscar(id_ordem)
+        if ordem.status != "FIRME":
+            raise ValueError(
+                f"Só é possível liberar ordem FIRME (status atual: {ordem.status})."
+            )
+        ordem.status = "LIBERADA"
+        return ordem
 
-        if ordem_alvo is None:
-            raise ValueError(f"Ordem não encontrada: {identificador}.")
+    def receber_compra(self, id_ordem):
+        """Encerra uma OC liberada, dando entrada da matéria-prima no estoque."""
+        ordem = self.buscar(id_ordem)
+        if ordem.tipo != "OC":
+            raise ValueError(f"{ordem.id} não é uma ordem de compra.")
+        if ordem.status != "LIBERADA":
+            raise ValueError(
+                f"Só é possível receber OC LIBERADA (status atual: {ordem.status})."
+            )
+        self.estoque.movimentar(
+            ordem.codigo_item, "ENTRADA", ordem.quantidade,
+            f"{ordem.id} (recebimento)",
+        )
+        ordem.status = "ENCERRADA"
+        return ordem
 
-        status_atual = ordem_alvo["status"]
-        if status_atual == "CONCLUIDA" and status_destino != "CONCLUIDA":
-            raise ValueError(f"A ordem {identificador} já está concluída e não pode retroceder.")
-        if status_atual == "CANCELADA" and status_destino != "CANCELADA":
-            raise ValueError(f"A ordem {identificador} está cancelada e não pode ser reaberta.")
+    def apontar_producao(self, id_ordem):
+        """RF11: baixa os componentes, dá entrada no produzido e encerra a OP."""
+        ordem = self.buscar(id_ordem)
+        if ordem.tipo != "OP":
+            raise ValueError(f"{ordem.id} não é uma ordem de produção.")
+        if ordem.status != "LIBERADA":
+            raise ValueError(
+                f"Só é possível apontar OP LIBERADA (status atual: {ordem.status})."
+            )
 
-        if status_destino == "CONCLUIDA" and status_atual != "CONCLUIDA":
-            if self.estoque is not None:
-                doc_mov = documento or f"CONCLUSAO-{identificador}"
-                self.estoque.movimentar(
-                    codigo_item=ordem_alvo["codigo_item"],
-                    tipo="ENTRADA",
-                    quantidade=ordem_alvo["quantidade"],
-                    documento=doc_mov,
+        componentes = self.estrutura.obter_componentes(ordem.codigo_item)
+        if not componentes:
+            raise ValueError(f"{ordem.codigo_item} não possui estrutura cadastrada.")
+
+        necessidades = {
+            filho: qtd_unitaria * ordem.quantidade
+            for filho, qtd_unitaria in componentes.items()
+        }
+        faltas = []
+        for filho, necessario in necessidades.items():
+            saldo = self.estoque.saldo(filho)
+            if saldo < necessario:
+                faltas.append(
+                    f"{filho}: precisa de {necessario:g}, saldo {saldo:g}"
                 )
+        if faltas:
+            raise ValueError(
+                "apontamento rejeitado, faltam componentes (" + "; ".join(faltas) + ")."
+            )
 
-        ordem_alvo["status"] = status_destino
-        return ordem_alvo
+        documento = f"{ordem.id} ({ordem.codigo_item})"
+        for filho, necessario in necessidades.items():
+            self.estoque.movimentar(filho, "SAIDA", necessario, documento)
+        self.estoque.movimentar(
+            ordem.codigo_item, "ENTRADA", ordem.quantidade, documento
+        )
+        ordem.status = "ENCERRADA"
+        return ordem
 
     def salvar(self, arquivo="ordens.json"):
-        """Grava a lista de ordens em arquivo JSON."""
-        salvar_json(arquivo, self.ordens)
+        """Grava as ordens e os contadores em JSON."""
+        dados = {
+            "contadores": self.contadores,
+            "ordens": [ordem.to_dict() for ordem in self.ordens],
+        }
+        salvar_json(arquivo, dados)
 
     def carregar(self, arquivo="ordens.json"):
-        """Carrega a lista de ordens a partir de um arquivo JSON."""
-        registros = carregar_json(arquivo, [])
-        self.ordens.clear()
-        for ordem in registros:
-            self._registrar_carregada(ordem)
+        """Carrega as ordens e os contadores a partir de JSON."""
+        dados = carregar_json(arquivo, {"contadores": {}, "ordens": []})
+        self.ordens = [Ordem.from_dict(d) for d in dados.get("ordens", [])]
+        self.contadores = {"OP": 0, "OC": 0}
+        for tipo, valor in dados.get("contadores", {}).items():
+            self.contadores[tipo] = int(valor)
+        for ordem in self.ordens:
+            numero = int(ordem.id.split("-")[1])
+            self.contadores[ordem.tipo] = max(self.contadores[ordem.tipo], numero)

@@ -1,10 +1,10 @@
 from persistencia import carregar_json, salvar_json
-from utils import codigo_validado
+from utils import codigo_valido
 
 
 def deduzir_tipo(codigo):
     codigo_limpo = codigo.strip().upper()
-    if not codigo_validado(codigo_limpo):
+    if not codigo_valido(codigo_limpo):
         raise ValueError("Código inválido. Use o formato PA-001, SA-010 ou MP-201.")
     return codigo_limpo[:2]
 

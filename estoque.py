@@ -75,7 +75,7 @@ class Estoque:
         tipo_mov = tipo.strip().upper()
         qtd = float(quantidade)
         doc = str(documento).strip()
-        data_mov = str(data).strip() if data else datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        data_mov = str(data).strip() if data else datetime.now().strftime("%d/%m/%Y")
 
         if not codigo:
             raise ValueError("O código do item é obrigatório.")
@@ -123,7 +123,7 @@ class Estoque:
 
     def salvar(self, arquivo="movimentos.csv"):
         """Grava o histórico do kardex em arquivo CSV."""
-        salvar_csv(arquivo, self.movimentos, self.CAMPOS_CSV)
+        salvar_csv(arquivo, self.CAMPOS_CSV, self.movimentos)
 
     def carregar(self, arquivo="movimentos.csv"):
         """Carrega o histórico do kardex a partir de um arquivo CSV."""
